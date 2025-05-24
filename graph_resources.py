@@ -16,12 +16,10 @@ from dotenv import load_dotenv
 import os
 load_dotenv()  # load environment variables from .env file
 DATABASE_URI = "bolt://localhost:7687"  # default to local Neo4j instance
-passw = "12345678"
-username = "neo4j"
-print("Database URI:", DATABASE_URI )  # ensure .env is loaded
+
 
 _driver = Neo4jGraph(
-    url=DATABASE_URI,
+    url=os.getenv("NEO4J_URI", DATABASE_URI),  # default URI
     username=os.getenv("NEO4J_USERNAME", "neo4j"),  # default username
     password=os.getenv("NEO4J_PASSWORD", "12345678"),  # default password
 )               # one connection pool per process (thread–safe) :contentReference[oaicite:5]{index=5}
