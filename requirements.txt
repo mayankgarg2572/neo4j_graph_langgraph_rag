@@ -1,0 +1,15 @@
+langchain_community
+tiktoken
+langchainhub
+langchain
+langgraph
+tavily-python
+sentence-transformers
+langchain-huggingface
+beautifulsoup4
+langchain-experimental
+neo4j
+json-repair
+langchain-google-genai
+faiss-cpu
+streamlit
