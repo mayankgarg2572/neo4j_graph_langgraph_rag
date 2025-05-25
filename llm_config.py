@@ -31,3 +31,17 @@ SCHEMA_LLM = ChatGroq(temperature=0,
 # # Define the Cohere LLM
 # MAIN_LLM = ChatCohere(model="command-r-03-2025", temperature=0.0)
 # SCHEMA_LLM = ChatCohere(model="command-r-03-2025", temperature=0.0)
+
+
+# from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
+
+# llm = HuggingFaceEndpoint(
+#     repo_id="HuggingFaceH4/zephyr-7b-beta",
+#     task="text-generation",
+#     max_new_tokens=512,
+#     do_sample=False,
+#     repetition_penalty=1.03,
+# )
+
+# MAIN_LLM = ChatHuggingFace(llm=llm)
+# SCHEMA_LLM = ChatHuggingFace(llm=llm)
