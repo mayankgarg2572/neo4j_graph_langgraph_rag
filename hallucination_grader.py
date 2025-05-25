@@ -1,9 +1,10 @@
 from langchain.prompts import PromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
+# from langchain_google_genai import ChatGoogleGenerativeAI
+from llm_config import MAIN_LLM
 
 from langchain_core.output_parsers import JsonOutputParser
 
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.0)
+# llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.0)
 
 prompt = PromptTemplate(
     template="""You are a grader assessing whether 
@@ -20,4 +21,4 @@ prompt = PromptTemplate(
     input_variables=["generation", "documents"],
 )
 
-hallucination_grader = prompt | llm | JsonOutputParser()
+hallucination_grader = prompt | MAIN_LLM | JsonOutputParser()

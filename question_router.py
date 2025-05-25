@@ -1,10 +1,12 @@
 from langchain.prompts import PromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
+# from langchain_google_genai import ChatGoogleGenerativeAI
+
+from llm_config import MAIN_LLM
 
 from langchain_core.output_parsers import JsonOutputParser
 
 
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash",  temperature=0.0)
+# llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash",  temperature=0.0)
 
 prompt = PromptTemplate(
     template="""You are an expert at routing a user question to the most appropriate data source. 
@@ -24,4 +26,4 @@ prompt = PromptTemplate(
     input_variables=["question"],
 )
 
-question_router = prompt | llm | JsonOutputParser()
+question_router = prompt | MAIN_LLM | JsonOutputParser()

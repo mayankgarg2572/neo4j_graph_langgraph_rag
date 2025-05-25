@@ -4,11 +4,12 @@ from composite_chain import composite_chain
 from hallucination_grader import hallucination_grader
 from retrieval_grader import retrieval_grader
 from answer_grader import answer_grader
+from llm_config import SCHEMA_LLM 
+
 
 # Imports
 import json
 from dotenv import load_dotenv
-from jsonschema import ValidationError
 import streamlit as st
 
 from langchain_community.tools.tavily_search import TavilySearchResults
@@ -23,30 +24,24 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 
 # Vector Retriever
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import FAISS
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS 
 
 # Graph imports
 from langgraph.graph import END, START, StateGraph
 
-# Load environment variables
-
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from langchain_community.graphs import Neo4jGraph
-from langchain_experimental.graph_transformers import LLMGraphTransformer
+
+from pydantic import BaseModel
+from typing import List
+from pydantic import BaseModel
 
 
-from langchain_core.pydantic_v1 import BaseModel
-from langchain_core.runnables import Runnable
-from typing import Dict, List
-from pydantic import BaseModel, ValidationError
+import torch
 
-# RAG_Graph:
-from langchain.prompts import PromptTemplate
-from langchain.chains import GraphCypherQAChain
-
+torch.classes.__path__ = [] # add this line to manually set it to empty.
 
 # Constants for UI
 PAGE_TITLE = "Advanced RAG"
@@ -58,6 +53,8 @@ from langchain_community.tools.tavily_search import TavilySearchResults
 
 ### Search
 web_search_tool = TavilySearchResults(k=3)
+
+load_dotenv()  # Load environment variables from .env file
 
 ### State
 class GraphState(TypedDict):
@@ -119,36 +116,29 @@ def ask_question(user_file):
 
 def split_the_user_file(user_file):
     """
-    Splits the user file into manageable chunks for processing.
+    Adaptively split the user file based on its structure
     """
+    content = user_file.read().decode().strip()
+    lines = [line.strip() for line in content.split('\n') if line.strip()]
     
-    documents = [user_file.read().decode()]
-    splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=200, chunk_overlap=30)
-    doc_splits = splitter.create_documents(documents)
+    # Check if data appears to be structured (tab-separated)
+    tab_separated_lines = sum(1 for line in lines if '\t' in line and len(line.split('\t')) >= 2)
+    
+    if tab_separated_lines / max(len(lines), 1) > 0.7:  # 70% threshold
+        # Structured data: split by lines
+        print("Using line-based splitting for structured data")
+        doc_splits = [Document(page_content=line) for line in lines]
+    else:
+        # Unstructured data: use recursive character splitting
+        print("Using recursive character splitting for unstructured data")
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=800,
+            chunk_overlap=80,
+            separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""]
+        )
+        doc_splits = splitter.create_documents([content])
     
     return doc_splits
-
-
-def get_neo4j_retriever(doc_splits):
-    """
-    Creates a retriever from the uploaded file by splitting it into chunks and inserting embeddings into a neo4j database.
-    """
-
-    graph = Neo4jGraph()
-    graph_llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.0)
-
-    graph_transformer = LLMGraphTransformer(
-        llm=graph_llm,
-        allowed_nodes=["Paper", "Author", "Topic"],
-        node_properties=["title", "summary", "url"],
-        allowed_relationships=["AUTHORED", "DISCUSSES", "RELATED_TO"],
-    )
-
-    graph_documents = graph_transformer.convert_to_graph_documents(doc_splits)
-
-    graph.add_graph_documents(graph_documents)
-
-    return graph
 
 
 def get_vector_retriever(doc_splits):
@@ -157,7 +147,9 @@ def get_vector_retriever(doc_splits):
     """
     vectorstore = FAISS.from_documents(
         documents=doc_splits,
-        embedding=HuggingFaceEmbeddings()
+        embedding=HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-mpnet-base-v2",
+        )
     )
 
     return vectorstore.as_retriever()
@@ -168,63 +160,99 @@ class GraphSchema(BaseModel):
     node_properties: List[str]
     allowed_relationships: List[str]
 
-# This is your LLM (can be Gemini or OpenAI)
+# # This is your LLM (can be Gemini or OpenAI)
 
-def design_neo4j_graph_schema(state: Dict) -> Dict:
-    """
-    Dynamically generate GraphRAG schema from input documents.
+# def design_neo4j_graph_schema(state: Dict) -> Dict:
+#     """
+#     Dynamically generate GraphRAG schema from input documents.
 
-    Args:
-        state: Graph state dict
+#     Args:
+#         state: Graph state dict
 
-    Returns:
-        state with added keys: allowed_nodes, node_properties, allowed_relationships
-    """
-    schema_llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0)
+#     Returns:
+#         state with added keys: allowed_nodes, node_properties, allowed_relationships
+#     """
+#     schema_llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0)
 
-    print("---DESIGNING GRAPH SCHEMA---")
-    # documents: List[Document] = state["documents"]
-    global doc_splits
+#     print("---DESIGNING GRAPH SCHEMA---")
+#     # documents: List[Document] = state["documents"]
+#     global doc_splits
 
+#     schema_prompt = (
+#         "You are a graph schema expert. Analyze the following documents and extract:\n"
+#         "- The most appropriate node types (entity categories)\n"
+#         "- Node properties (metadata fields)\n"
+#         "- Possible relationships between entities\n\n"
+#         "Return ONLY valid JSON in this structure:\n"
+#     "{\n"
+#     '  "allowed_nodes": ["Entity1", "Entity2"],\n'
+#     '  "node_properties": ["title", "summary"],\n'
+#     '  "allowed_relationships": ["AUTHORED", "MENTIONS"]\n'
+#     "}\n\n"
+#     "Ensure all keys are present and all values are lists of strings.\n"
+#     "Do NOT include any extra text or explanations.\n\n"
+#     "Documents:\n"
+#         + "\n\n".join([doc.page_content[:1000] for doc in doc_splits[:5]])  # limit to first few chunks
+#     )
+
+#     raw_response = schema_llm.invoke(schema_prompt)
+    
+#     # Parse JSON safely
+#     try:
+#         parsed_json = json.loads(raw_response) if isinstance(raw_response, str) else raw_response
+#         schema = GraphSchema(**parsed_json)
+#     except (json.JSONDecodeError, ValidationError) as e:
+#         print("---SCHEMA VALIDATION FAILED---")
+#         print(e)
+#         return {
+#             **state,
+#             "allowed_nodes": [],
+#             "node_properties": [],
+#             "allowed_relationships": [],
+#         }
+
+#     return {
+#         **state,
+#         "allowed_nodes": schema.allowed_nodes,
+#         "node_properties": schema.node_properties,
+#         "allowed_relationships": schema.allowed_relationships
+#     }
+
+
+def generate_schema_once(doc_splits):
+    """Generate schema once and cache it"""
+    schema_llm = SCHEMA_LLM
+    
     schema_prompt = (
         "You are a graph schema expert. Analyze the following documents and extract:\n"
         "- The most appropriate node types (entity categories)\n"
-        "- Node properties (metadata fields)\n"
+        "- Node properties (metadata fields)\n" 
         "- Possible relationships between entities\n\n"
         "Return ONLY valid JSON in this structure:\n"
-    "{\n"
-    '  "allowed_nodes": ["Entity1", "Entity2"],\n'
-    '  "node_properties": ["title", "summary"],\n'
-    '  "allowed_relationships": ["AUTHORED", "MENTIONS"]\n'
-    "}\n\n"
-    "Ensure all keys are present and all values are lists of strings.\n"
-    "Do NOT include any extra text or explanations.\n\n"
-    "Documents:\n"
-        + "\n\n".join([doc.page_content[:1000] for doc in doc_splits[:5]])  # limit to first few chunks
+        "{\n"
+        '  "allowed_nodes": ["Entity1", "Entity2"],\n'
+        '  "node_properties": ["title", "summary"],\n'
+        '  "allowed_relationships": ["AUTHORED", "MENTIONS"]\n'
+        "}\n\n"
+        "No need to provide any explanations or additional text.\n\n"
+        "Ensure all keys are present and all values are lists of strings as in above example.\n\n"
+        "Must ensure you just return a valid JSON object having structure similar to the above example with no additional text.\n\n"
+        "Documents:\n"
+        + "\n\n".join([doc.page_content for doc in doc_splits])
     )
-
-    raw_response = schema_llm.invoke(schema_prompt)
     
-    # Parse JSON safely
     try:
-        parsed_json = json.loads(raw_response) if isinstance(raw_response, str) else raw_response
-        schema = GraphSchema(**parsed_json)
-    except (json.JSONDecodeError, ValidationError) as e:
-        print("---SCHEMA VALIDATION FAILED---")
-        print(e)
-        return {
-            **state,
-            "allowed_nodes": [],
-            "node_properties": [],
-            "allowed_relationships": [],
-        }
-
-    return {
-        **state,
-        "allowed_nodes": schema.allowed_nodes,
-        "node_properties": schema.node_properties,
-        "allowed_relationships": schema.allowed_relationships
-    }
+        raw_response = schema_llm.invoke(schema_prompt)
+        print("LLM response for graph database schema:", raw_response.content if hasattr(raw_response, 'content') else raw_response)
+        parsed_json = json.loads(raw_response.content if hasattr(raw_response, 'content') else raw_response)
+        return GraphSchema(**parsed_json)
+    except Exception as e:
+        print(f"Schema generation failed: {e}")
+        return GraphSchema(
+            allowed_nodes=[],
+            node_properties=[],
+            allowed_relationships=[]
+        )
 
 
 def handle_file_upload(user_file):
@@ -235,8 +263,11 @@ def handle_file_upload(user_file):
         return
     
     # Split the user file into manageable chunks
-    global doc_splits
+    global doc_splits, graph_schema
     doc_splits = split_the_user_file(user_file)
+
+    # Generate schema once during upload
+    graph_schema = generate_schema_once(doc_splits)
 
     vector_retiever = get_vector_retriever(doc_splits)
     
@@ -283,6 +314,7 @@ def generate(state):
     generation = composite_chain.invoke(
         {"question": question, "context": documents, "graph_context": graph_context}
     )
+    print("Final generated response:", generation)
     return {
         "documents": documents,
         "question": question,
@@ -391,10 +423,7 @@ def decide_to_generate(state):
     """
 
     print("---ASSESS GRADED DOCUMENTS---")
-    question = state["question"]
     web_search = state["web_search"]
-    filtered_documents = state["documents"]
-
     if web_search == "Yes":
         # All documents have been filtered check_relevance
         # We will re-generate a new query
@@ -420,11 +449,21 @@ def graph_search(state):
     """
     print("---GRAPH SEARCH---")
 
-    nodes = state.get("allowed_nodes", [])
-    rels = state.get("allowed_relationships", [])
-    props = state.get("node_properties", [])
+    # nodes = state.get("allowed_nodes", [])
+    # rels = state.get("allowed_relationships", [])
+    # props = state.get("node_properties", [])
 
-    _, graph_rag_chain = get_resources(nodes, rels, props)  # heavy objects are global
+    # Use the cached schema instead of generating new one
+    global graph_schema
+    if 'graph_schema' not in globals() or len(graph_schema.allowed_nodes) == 0 or len(graph_schema.allowed_relationships) == 0 or len(graph_schema.node_properties) == 0:
+
+        return {"graph_context": "No graph schema available", "question": state["question"]}
+    
+    nodes = graph_schema.allowed_nodes
+    rels = graph_schema.allowed_relationships  
+    props = graph_schema.node_properties
+
+    _, graph_rag_chain = get_resources(nodes, rels, props, doc_splits)  # heavy objects are global
     # result       = rag_chain.invoke({"query": state["query"]})
     question = state["question"]
 
@@ -511,7 +550,7 @@ def create_graph():
     workflow = StateGraph(GraphState)
 
     # Define the nodes
-    workflow.add_node("neo4j_graph_schema", design_neo4j_graph_schema)  # design graph schema
+    # workflow.add_node("neo4j_graph_schema", design_neo4j_graph_schema)  # design graph schema
     workflow.add_node("websearch", web_search)  # web search
     workflow.add_node("retrieve", retrieve)  # retrieve
     workflow.add_node("grade_documents", grade_documents)  # grade documents
@@ -520,10 +559,8 @@ def create_graph():
     # Set conditional entry point
 
     # Add edges
-    workflow.add_edge(START, "neo4j_graph_schema")
-
-    workflow.add_conditional_edges(
-        "neo4j_graph_schema",
+    # workflow.add_edge(START, "neo4j_graph_schema")
+    workflow.set_conditional_entry_point(
         route_question,
         {
             "websearch": "websearch",
@@ -531,6 +568,15 @@ def create_graph():
             "graphrag": "graphrag",
         },
     )
+    # workflow.add_conditional_edges(
+    #     "neo4j_graph_schema",
+    #     route_question,
+    #     {
+    #         "websearch": "websearch",
+    #         "retrieve": "retrieve",
+    #         "graphrag": "graphrag",
+    #     },
+    # )
 
     workflow.add_edge("retrieve", "grade_documents")
     workflow.add_edge("graphrag", "generate")
@@ -556,17 +602,6 @@ def create_graph():
     # Compile
     app = workflow.compile()
     return app
-
-
-# def generate_answer(state: GraphState):
-#     """
-#     Generates an answer based on the retrieved documents.
-#     """    
-#     question = state["question"]
-#     documents = state["documents"]
-
-#     solution = generate_chain.invoke({"context": documents, "question": question})
-#     return {"documents": documents, "question": question, "solution": solution}
 
 
 def search_online(state: GraphState):

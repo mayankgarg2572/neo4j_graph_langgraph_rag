@@ -1,7 +1,9 @@
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain.chains.base import Chain
+
 from langchain_google_genai import ChatGoogleGenerativeAI
+
+from llm_config import MAIN_LLM
 
 prompt = PromptTemplate(
     template="""You are an assistant for question-answering tasks. 
@@ -16,7 +18,7 @@ prompt = PromptTemplate(
 )
 
 
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.0)
+# llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.0)
 # llm = ChatOllama(model=local_llm, temperature=0)
 
-composite_chain = prompt | llm | StrOutputParser()
+composite_chain = prompt | MAIN_LLM | StrOutputParser()

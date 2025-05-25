@@ -1,3 +1,5 @@
+langchain-groq
+groq
 langchain_community
 tiktoken
 langchainhub
@@ -13,3 +15,6 @@ json-repair
 langchain-google-genai
 faiss-cpu
 streamlit
+langchain-neo4j
+langchain-together
+langchain-cohere

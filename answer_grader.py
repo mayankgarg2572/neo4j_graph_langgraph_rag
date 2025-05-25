@@ -1,9 +1,11 @@
 from langchain.prompts import PromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
+# from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.output_parsers import JsonOutputParser
 
+from llm_config import MAIN_LLM
 
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.0)
+
+# llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.0)
 
 
 prompt = PromptTemplate(
@@ -19,4 +21,4 @@ prompt = PromptTemplate(
     input_variables=["generation", "question"],
 )
 
-answer_grader = prompt | llm | JsonOutputParser()
+answer_grader = prompt | MAIN_LLM | JsonOutputParser()
