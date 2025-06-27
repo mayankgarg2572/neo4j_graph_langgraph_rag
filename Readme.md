@@ -47,6 +47,10 @@ git clone repo-url
 
 cd neo4j_graph_langgraph_rag
 
+python -m venv graphenv
+
+graphenv/Scripts/activate
+
 pip install -r requirements.txt
 
 streamlit run app.py

@@ -160,64 +160,6 @@ class GraphSchema(BaseModel):
     node_properties: List[str]
     allowed_relationships: List[str]
 
-# # This is your LLM (can be Gemini or OpenAI)
-
-# def design_neo4j_graph_schema(state: Dict) -> Dict:
-#     """
-#     Dynamically generate GraphRAG schema from input documents.
-
-#     Args:
-#         state: Graph state dict
-
-#     Returns:
-#         state with added keys: allowed_nodes, node_properties, allowed_relationships
-#     """
-#     schema_llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0)
-
-#     print("---DESIGNING GRAPH SCHEMA---")
-#     # documents: List[Document] = state["documents"]
-#     global doc_splits
-
-#     schema_prompt = (
-#         "You are a graph schema expert. Analyze the following documents and extract:\n"
-#         "- The most appropriate node types (entity categories)\n"
-#         "- Node properties (metadata fields)\n"
-#         "- Possible relationships between entities\n\n"
-#         "Return ONLY valid JSON in this structure:\n"
-#     "{\n"
-#     '  "allowed_nodes": ["Entity1", "Entity2"],\n'
-#     '  "node_properties": ["title", "summary"],\n'
-#     '  "allowed_relationships": ["AUTHORED", "MENTIONS"]\n'
-#     "}\n\n"
-#     "Ensure all keys are present and all values are lists of strings.\n"
-#     "Do NOT include any extra text or explanations.\n\n"
-#     "Documents:\n"
-#         + "\n\n".join([doc.page_content[:1000] for doc in doc_splits[:5]])  # limit to first few chunks
-#     )
-
-#     raw_response = schema_llm.invoke(schema_prompt)
-    
-#     # Parse JSON safely
-#     try:
-#         parsed_json = json.loads(raw_response) if isinstance(raw_response, str) else raw_response
-#         schema = GraphSchema(**parsed_json)
-#     except (json.JSONDecodeError, ValidationError) as e:
-#         print("---SCHEMA VALIDATION FAILED---")
-#         print(e)
-#         return {
-#             **state,
-#             "allowed_nodes": [],
-#             "node_properties": [],
-#             "allowed_relationships": [],
-#         }
-
-#     return {
-#         **state,
-#         "allowed_nodes": schema.allowed_nodes,
-#         "node_properties": schema.node_properties,
-#         "allowed_relationships": schema.allowed_relationships
-#     }
-
 
 def generate_schema_once(doc_splits):
     """Generate schema once and cache it"""
@@ -240,6 +182,9 @@ def generate_schema_once(doc_splits):
         "Documents:\n"
         + "\n\n".join([doc.page_content for doc in doc_splits])
     )
+    import os
+    # I need to print the apikey the llm model is using to verify which model is being used
+    print("Using LLM model:", os.getenv("GOOGLE_API_KEY", "Not Set"))
     
     try:
         raw_response = schema_llm.invoke(schema_prompt)
