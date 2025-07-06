@@ -1,0 +1,1153 @@
+Directory structure:
+└── mayankgarg2572-neo4j_graph_langgraph_rag/
+    ├── evaluation/
+    │   └── decision.py
+    ├── generation/
+    │   └── generate.py
+    ├── graph/
+    │   ├── __init__.py
+    │   ├── graph_resources.py
+    │   └── search.py
+    ├── ingestion/
+    │   ├── __init__.py
+    │   ├── file_splitter.py
+    │   └── vector_store.py
+    ├── pipeline/
+    │   ├── __init__.py
+    │   ├── node_router.py
+    │   └── workflow.py
+    ├── retrieval/
+    │   ├── __init__.py
+    │   ├── grading.py
+    │   └── retrieve.py
+    ├── schema/
+    │   ├── __init__.py
+    │   └── generator.py
+    ├── ui/
+    │   ├── __init__.py
+    │   └── core.py
+    ├── utils/
+    │   ├── runtime.py
+    │   └── types.py
+    ├── .env
+    ├── .gitignore
+    ├── app.py
+    ├── composite_chain.py
+    ├── config.py
+    └── requirements.txt
+
+
+Files Content:
+
+================================================
+FILE: Readme.md
+================================================
+Generated a Neo4j RAG system with using LangGraph
+
+Here the user provided Text database will be used to generate a RAG system.
+
+Here User will have the full freedom, the user can upload any type of .txt file to do so.
+
+I have deveoped this application to specifically leverage the system of Graph Database in a RAG application to easily and smartly enhance its power to reveal complex realtionship in database which is usually difficult to be extract by vector database.
+
+Here all the tasks will be handled by the AI agent it self
+
+# Installation guide:
+
+### The neo4j desktop setup
+
+Download the neo4j desktop from the URL:
+
+Then install it
+
+After that open it:
+
+![1748117127706](image/Readme/1748117127706.png)
+
+Just open the Project tab at the top left corner. Then create a new project, name it whatever you want. Then start it, by clicking on the start button.
+
+After that go to the plugins tab as shown in the right hand side side bar along side the Details and Upgrade(you just need to click the project you will be able to open this side bar).
+
+Now install the plugin APOC.
+
+Set up your environment then, just create a `.env` file the paste the content from `.env.example` to this file. Provide the respective API keys like as mentioned:
+
+The Gemini API key
+
+The Tavily API key
+
+And the Neo4j setup. The default password here will be "password" and username will be "neo4j"(both are without quotes here are represented so everyone will have the clear vsion).
+
+Now, you are ready for python code installation setup.
+
+I have used python version 3.12 to implement this code.
+
+So first I have created a virtual environment
+
+Then
+
+```bash
+git clone repo-url
+
+cd neo4j_graph_langgraph_rag
+
+python -m venv graphenv
+
+graphenv/Scripts/activate
+
+pip install -r requirements.txt
+
+streamlit run app.py
+```
+
+All the best!
+
+
+
+================================================
+FILE: answer_grader.py
+================================================
+from langchain.prompts import PromptTemplate
+# from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.output_parsers import JsonOutputParser
+
+from llm_config import MAIN_LLM
+
+
+# llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.0)
+
+
+prompt = PromptTemplate(
+    template="""You are a grader assessing whether an 
+    answer is useful to resolve a question. Give a binary score 'yes' or 'no' to indicate whether the answer is 
+    useful to resolve a question. Provide the binary score as a JSON with a single key 'score' and no preamble or explanation.
+     
+    Here is the answer:
+    {generation} 
+
+    Here is the question: {question}
+    """,
+    input_variables=["generation", "question"],
+)
+
+answer_grader = prompt | MAIN_LLM | JsonOutputParser()
+
+
+================================================
+FILE: app.py
+================================================
+from graph_resources import get_resources
+from question_router import question_router
+from composite_chain import composite_chain
+from hallucination_grader import hallucination_grader
+from retrieval_grader import retrieval_grader
+from answer_grader import answer_grader
+from llm_config import SCHEMA_LLM 
+
+
+# Imports
+import json
+from dotenv import load_dotenv
+import streamlit as st
+
+from langchain_community.tools.tavily_search import TavilySearchResults
+
+# State Setup
+from typing_extensions import TypedDict
+from typing import List
+
+# Doc Splitters
+from langchain.schema import Document
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+
+# Vector Retriever
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS 
+
+# Graph imports
+from langgraph.graph import END, START, StateGraph
+
+
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+
+from pydantic import BaseModel
+from typing import List
+from pydantic import BaseModel
+
+
+import torch
+
+torch.classes.__path__ = [] # add this line to manually set it to empty.
+
+# Constants for UI
+PAGE_TITLE = "Advanced RAG"
+PAGE_ICON = "🔎"
+FILE_UPLOAD_PROMPT = "Upload your Text file here"
+FILE_UPLOAD_TYPE = ".txt"
+
+from langchain_community.tools.tavily_search import TavilySearchResults
+
+### Search
+web_search_tool = TavilySearchResults(k=3)
+
+load_dotenv()  # Load environment variables from .env file
+
+### State
+class GraphState(TypedDict):
+    """
+    Represents the state of our graph.
+
+    Attributes:
+        question: question
+        generation: LLM generation
+        web_search: whether to add search
+        documents: list of documents
+        graph_context: results from graph search
+    """
+
+    question: str
+    generation: str
+    web_search: str
+    documents: List[str]
+    graph_context: str
+
+
+# Setup the UI configuration
+def setup_ui():
+    """
+    Configures the Streamlit app page settings and displays the main title.
+    """
+    st.set_page_config(
+        page_title=PAGE_TITLE, 
+        page_icon=PAGE_ICON
+    )
+    st.header("",divider='blue')
+    st.title(f"{PAGE_ICON} :blue[_{PAGE_TITLE}_] | Text File Search")
+    st.header("",divider='blue')
+
+
+def ask_question(user_file):
+    """
+    Allows the user to ask a question about the uploaded file and displays the result.
+    """    
+    if user_file is None:
+        return
+    st.divider()
+    question = st.text_input('Please enter your question:', placeholder = "Which year was Marty transported to?", disabled=not user_file)
+    # Test
+    from pprint import pprint
+    if question:
+        with st.spinner('Please wait...'):
+            app = create_graph()
+
+            for output in app.stream({"question": question}):
+                for key, value in output.items():
+                    st.info(f"Finished running: {key}:")
+                    st.divider()
+                    pprint(f"Finished running: {key}:")
+            # result = graph.invoke(input={"question": question})
+            st.info(value["generation"])
+            st.divider()
+
+
+def split_the_user_file(user_file):
+    """
+    Adaptively split the user file based on its structure
+    """
+    content = user_file.read().decode().strip()
+    lines = [line.strip() for line in content.split('\n') if line.strip()]
+    
+    # Check if data appears to be structured (tab-separated)
+    tab_separated_lines = sum(1 for line in lines if '\t' in line and len(line.split('\t')) >= 2)
+    
+    if tab_separated_lines / max(len(lines), 1) > 0.7:  # 70% threshold
+        # Structured data: split by lines
+        print("Using line-based splitting for structured data")
+        doc_splits = [Document(page_content=line) for line in lines]
+    else:
+        # Unstructured data: use recursive character splitting
+        print("Using recursive character splitting for unstructured data")
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=800,
+            chunk_overlap=80,
+            separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""]
+        )
+        doc_splits = splitter.create_documents([content])
+    
+    return doc_splits
+
+
+def get_vector_retriever(doc_splits):
+    """
+    Creates a retriever from the uploaded file by splitting it into chunks and inserting embeddings into a vector database.
+    """
+    vectorstore = FAISS.from_documents(
+        documents=doc_splits,
+        embedding=HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-mpnet-base-v2",
+        )
+    )
+
+    return vectorstore.as_retriever()
+
+
+class GraphSchema(BaseModel):
+    allowed_nodes: List[str]
+    node_properties: List[str]
+    allowed_relationships: List[str]
+
+
+def generate_schema_once(doc_splits):
+    """Generate schema once and cache it"""
+    schema_llm = SCHEMA_LLM
+    
+    schema_prompt = (
+        "You are a graph schema expert. Analyze the following documents and extract:\n"
+        "- The most appropriate node types (entity categories)\n"
+        "- Node properties (metadata fields)\n" 
+        "- Possible relationships between entities\n\n"
+        "Return ONLY valid JSON in this structure:\n"
+        "{\n"
+        '  "allowed_nodes": ["Entity1", "Entity2"],\n'
+        '  "node_properties": ["title", "summary"],\n'
+        '  "allowed_relationships": ["AUTHORED", "MENTIONS"]\n'
+        "}\n\n"
+        "No need to provide any explanations or additional text.\n\n"
+        "Ensure all keys are present and all values are lists of strings as in above example.\n\n"
+        "Must ensure you just return a valid JSON object having structure similar to the above example with no additional text.\n\n"
+        "Documents:\n"
+        + "\n\n".join([doc.page_content for doc in doc_splits])
+    )
+    import os
+    # I need to print the apikey the llm model is using to verify which model is being used
+    print("Using LLM model:", os.getenv("GOOGLE_API_KEY", "Not Set"))
+    
+    try:
+        raw_response = schema_llm.invoke(schema_prompt)
+        print("LLM response for graph database schema:", raw_response.content if hasattr(raw_response, 'content') else raw_response)
+        parsed_json = json.loads(raw_response.content if hasattr(raw_response, 'content') else raw_response)
+        return GraphSchema(**parsed_json)
+    except Exception as e:
+        print(f"Schema generation failed: {e}")
+        return GraphSchema(
+            allowed_nodes=[],
+            node_properties=[],
+            allowed_relationships=[]
+        )
+
+
+def handle_file_upload(user_file):
+    """
+    Handles the uploaded text file, splits it into chunks, and inserts embeddings into a vector database.
+    """
+    if user_file is None:
+        return
+    
+    # Split the user file into manageable chunks
+    global doc_splits, graph_schema
+    doc_splits = split_the_user_file(user_file)
+
+    # Generate schema once during upload
+    graph_schema = generate_schema_once(doc_splits)
+
+    vector_retiever = get_vector_retriever(doc_splits)
+    
+    st.success("Text file embeddings were successfully inserted into VectorDB")
+
+    return vector_retiever
+
+
+def retrieve(state):
+    """
+    Retrieve documents from vectorstore
+
+    Args:
+        state (dict): The current graph state
+
+    Returns:
+        state (dict): New key added to state, documents, that contains retrieved documents
+    """
+    print("---RETRIEVE---")
+    question = state["question"]
+
+    # Retrieval
+    documents = retriever.invoke(question)
+    return {"documents": documents, "question": question}
+
+
+# Generate answer by invoking composite_chain on retrieved documents and graph context
+def generate(state):
+    """
+    Generate answer using RAG on retrieved documents and graph context
+
+    Args:
+        state (dict): The current graph state
+
+    Returns:
+        state (dict): New key added to state, generation, that contains LLM generation
+    """
+    print("---GENERATE---")
+    question = state["question"]
+    documents = state.get("documents", [])
+    graph_context = state.get("graph_context", "")
+
+    # Composite RAG generation
+    generation = composite_chain.invoke(
+        {"question": question, "context": documents, "graph_context": graph_context}
+    )
+    print("Final generated response:", generation)
+    return {
+        "documents": documents,
+        "question": question,
+        "generation": generation,
+        "graph_context": graph_context,
+    }
+
+
+# Grade documents using retrieval_grader to determine relevance to the question, If any of the doc is irrelevant, we will set web_search flag
+def grade_documents(state):
+    """
+    Determines whether the retrieved documents are relevant to the question
+    If any document is not relevant, we will set a flag to run web search
+
+    Args:
+        state (dict): The current graph state
+
+    Returns:
+        state (dict): Filtered out irrelevant documents and updated web_search state
+    """
+
+    print("---CHECK DOCUMENT RELEVANCE TO QUESTION---")
+    question = state["question"]
+    documents = state["documents"]
+
+    # Score each doc
+    filtered_docs = []
+    web_search = "No"
+    for d in documents:
+        score = retrieval_grader.invoke(
+            {"question": question, "document": d.page_content}
+        )
+        grade = score["score"]
+        # Document relevant
+        if grade.lower() == "yes":
+            print("---GRADE: DOCUMENT RELEVANT---")
+            filtered_docs.append(d)
+        # Document not relevant
+        else:
+            print("---GRADE: DOCUMENT NOT RELEVANT---")
+            # We do not include the document in filtered_docs
+            # We set a flag to indicate that we want to run web search
+            web_search = "Yes"
+            continue
+    return {"documents": filtered_docs, "question": question, "web_search": web_search}
+
+
+def web_search(state):
+    """
+    Web search based on the question
+
+    Args:
+        state (dict): The current graph state
+
+    Returns:
+        state (dict): Appended web results to documents
+    """
+
+    print("---WEB SEARCH---")
+    question = state["question"]
+    documents = state.get("documents", [])  # Use get() with a default empty list
+
+    # Web search
+    docs = web_search_tool.invoke({"query": question})
+    web_results = "\n".join([d["content"] for d in docs])
+    web_results = Document(page_content=web_results)
+    documents.append(web_results)
+
+    return {"documents": documents, "question": question}
+
+
+### Conditional edge
+def route_question(state):
+    print("---ROUTE QUESTION---")
+    question = state["question"]
+    print(question)
+    source = question_router.invoke({"question": question})
+    print(source)
+    print(source["datasource"])
+
+    if source["datasource"] == "graphrag":
+        print("---TRYING GRAPH SEARCH---")
+        graph_result = graph_search({"question": question})
+        if graph_result["graph_context"] != "No results found in the graph database.":
+            return "graphrag"
+        else:
+            print("---NO RESULTS IN GRAPH, FALLING BACK TO VECTORSTORE---")
+            return "retrieve"
+    elif source["datasource"] == "vectorstore":
+        print("---ROUTE QUESTION TO VECTORSTORE RAG---")
+        return "retrieve"
+    elif source["datasource"] == "web_search":
+        print("---ROUTE QUESTION TO WEB SEARCH---")
+        return "websearch"
+
+
+def decide_to_generate(state):
+    """
+    Determines whether to generate an answer, or add web search
+
+    Args:
+        state (dict): The current graph state
+
+    Returns:
+        str: Binary decision for next node to call
+    """
+
+    print("---ASSESS GRADED DOCUMENTS---")
+    web_search = state["web_search"]
+    if web_search == "Yes":
+        # All documents have been filtered check_relevance
+        # We will re-generate a new query
+        print(
+            "---DECISION: ALL DOCUMENTS ARE NOT RELEVANT TO QUESTION, INCLUDE WEB SEARCH---"
+        )
+        return "websearch"
+    else:
+        # We have relevant documents, so generate answer
+        print("---DECISION: GENERATE---")
+        return "generate"
+
+
+def graph_search(state):
+    """
+    Perform GraphRAG search using Neo4j
+
+    Args:
+        state (dict): The current graph state
+
+    Returns:
+        state (dict): Updated state with graph search results
+    """
+    print("---GRAPH SEARCH---")
+
+    # nodes = state.get("allowed_nodes", [])
+    # rels = state.get("allowed_relationships", [])
+    # props = state.get("node_properties", [])
+
+    # Use the cached schema instead of generating new one
+    global graph_schema
+    if 'graph_schema' not in globals() or len(graph_schema.allowed_nodes) == 0 or len(graph_schema.allowed_relationships) == 0 or len(graph_schema.node_properties) == 0:
+
+        return {"graph_context": "No graph schema available", "question": state["question"]}
+    
+    nodes = graph_schema.allowed_nodes
+    rels = graph_schema.allowed_relationships  
+    props = graph_schema.node_properties
+
+    _, graph_rag_chain = get_resources(nodes, rels, props, doc_splits)  # heavy objects are global
+    # result       = rag_chain.invoke({"query": state["query"]})
+    question = state["question"]
+
+    # Use the graph_rag_chain to perform the search
+    result = graph_rag_chain.invoke({"query": question})
+
+    # Extract the relevant information from the result
+    # Adjust this based on what graph_rag_chain returns
+    graph_context = result.get("result", "")
+
+    # You might want to combine this with existing documents or keep it separate
+    return {"graph_context": graph_context, "question": question}
+
+
+### Conditional edge
+def grade_generation_v_documents_and_question(state):
+    """
+    Determines whether the generation is grounded in the document and answers question.
+
+    Args:
+        state (dict): The current graph state
+
+    Returns:
+        str: Decision for next node to call
+    """
+
+    print("---CHECK HALLUCINATIONS---")
+    question = state["question"]
+    documents = state["documents"]
+    generation = state["generation"]
+
+    score = hallucination_grader.invoke(
+        {"documents": documents, "generation": generation}
+    )
+    grade = grade = score.get("score", "").lower()
+
+    # Check hallucination
+    if grade == "yes":
+        print("---DECISION: GENERATION IS GROUNDED IN DOCUMENTS---")
+        # Check question-answering
+        print("---GRADE GENERATION vs QUESTION---")
+        score = answer_grader.invoke({"question": question, "generation": generation})
+        grade = score["score"]
+        if grade == "yes":
+            print("---DECISION: GENERATION ADDRESSES QUESTION---")
+            return "useful"
+        else:
+            print("---DECISION: GENERATION DOES NOT ADDRESS QUESTION---")
+            return "not useful"
+    else:
+        print("---DECISION: GENERATION IS NOT GROUNDED IN DOCUMENTS, RE-TRY---")
+        return "not supported"
+
+
+def is_valid_schema(state):
+    """
+    Checks if the graph schema is valid.
+
+    Args:
+        state (dict): The current graph state
+
+    Returns:
+        bool: True if the schema is valid, False otherwise
+    """
+    print("---CHECK GRAPH SCHEMA VALIDITY---")
+    allowed_nodes = state.get("allowed_nodes", [])
+    node_properties = state.get("node_properties", [])
+    allowed_relationships = state.get("allowed_relationships", [])
+
+    # Check if all required fields are present and non-empty
+    return {
+        is_valid_schema: isinstance(allowed_nodes, list) and allowed_nodes
+        and isinstance(node_properties, list) and node_properties
+        and isinstance(allowed_relationships, list) and allowed_relationships and len(allowed_nodes)> 0 and len(node_properties) > 0 and len(allowed_relationships) > 0
+    }
+
+
+def create_graph(): 
+    """
+    Creates and configures the state graph for handling queries and generating answers.
+    """
+    from langgraph.graph import END, StateGraph
+
+    workflow = StateGraph(GraphState)
+
+    # Define the nodes
+    # workflow.add_node("neo4j_graph_schema", design_neo4j_graph_schema)  # design graph schema
+    workflow.add_node("websearch", web_search)  # web search
+    workflow.add_node("retrieve", retrieve)  # retrieve
+    workflow.add_node("grade_documents", grade_documents)  # grade documents
+    workflow.add_node("generate", generate)  # generatae
+    workflow.add_node("graphrag", graph_search)
+    # Set conditional entry point
+
+    # Add edges
+    # workflow.add_edge(START, "neo4j_graph_schema")
+    workflow.set_conditional_entry_point(
+        route_question,
+        {
+            "websearch": "websearch",
+            "retrieve": "retrieve",
+            "graphrag": "graphrag",
+        },
+    )
+    # workflow.add_conditional_edges(
+    #     "neo4j_graph_schema",
+    #     route_question,
+    #     {
+    #         "websearch": "websearch",
+    #         "retrieve": "retrieve",
+    #         "graphrag": "graphrag",
+    #     },
+    # )
+
+    workflow.add_edge("retrieve", "grade_documents")
+    workflow.add_edge("graphrag", "generate")
+    workflow.add_conditional_edges(
+        "grade_documents",
+        decide_to_generate,
+        {
+            "websearch": "websearch",
+            "generate": "generate",
+        },
+    )
+    workflow.add_edge("websearch", "generate")
+    workflow.add_conditional_edges(
+        "generate",
+        grade_generation_v_documents_and_question,
+        {
+            "not supported": "generate",
+            "useful": END,
+            "not useful": "websearch",
+        },
+    )
+
+    # Compile
+    app = workflow.compile()
+    return app
+
+
+def search_online(state: GraphState):
+    """
+    Searches online for additional context if the answer cannot be generated locally.
+    """    
+    question = state["question"]
+    documents = state["documents"]
+    tavily_client = TavilySearchResults(k=2)
+    response = tavily_client.invoke({"query": question})
+    results = "\n".join([element["content"] for element in response])
+    results = Document(page_content=results)
+    if documents is not None:
+        documents.append(results)
+    else:
+        documents = [results]
+    return {"documents": documents, "question": question}
+
+# Main function to orchestrate the app
+def main():
+    # Setup the UI
+    setup_ui()
+    
+    # File uploader
+    user_file = st.file_uploader(FILE_UPLOAD_PROMPT, type=FILE_UPLOAD_TYPE)
+    
+    # Handle the file upload
+    global retriever
+    retriever = handle_file_upload(user_file)
+    
+
+    # Ask the question
+    ask_question(user_file)
+
+if __name__ == "__main__":
+    load_dotenv()
+    main()
+
+
+
+================================================
+FILE: composite_chain.py
+================================================
+from langchain.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+from llm_config import MAIN_LLM
+
+prompt = PromptTemplate(
+    template="""You are an assistant for question-answering tasks. 
+    Use the following pieces of retrieved context from a vector store and a graph database to answer the question. If you don't know the answer, just say that you don't know. 
+    Use three sentences maximum and keep the answer concise:
+    Question: {question} 
+    Vector Context: {context} 
+    Graph Context: {graph_context}
+    Answer: 
+    """,
+    input_variables=["question", "context", "graph_context"],
+)
+
+
+# llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.0)
+# llm = ChatOllama(model=local_llm, temperature=0)
+
+composite_chain = prompt | MAIN_LLM | StrOutputParser()
+
+
+================================================
+FILE: FREE_API_RESOURCES.txt
+================================================
+lmstudio
+cohere
+together
+groq
+mistral
+
+
+
+
+================================================
+FILE: graph_resources.py
+================================================
+# graph_resources.py
+from __future__ import annotations
+from functools import lru_cache
+from typing  import Tuple, Sequence, Optional
+
+# from  langchain_neo4j import Neo4jGraph
+from langchain_community.graphs import Neo4jGraph  # ← inherits GraphStore
+from langchain_experimental.graph_transformers import LLMGraphTransformer  # docs 
+from langchain.chains import GraphCypherQAChain
+from langchain.prompts import PromptTemplate
+
+from langchain_core.documents import Document  # for RAG (retrieval-augmented generation)
+
+from llm_config import MAIN_LLM
+
+# ----------------------------------------------------------------------
+# 1. Global, reusable driver and LLM (schema-independent)
+# ----------------------------------------------------------------------
+# I want to access the database uri stored in the environment variable
+from dotenv import load_dotenv
+import os
+load_dotenv()  # load environment variables from .env file
+DATABASE_URI = "bolt://localhost:7687"  # default to local Neo4j instance
+
+
+_driver = Neo4jGraph(
+    url=os.getenv("NEO4J_URI", DATABASE_URI),  # default URI
+    username=os.getenv("NEO4J_USERNAME", "neo4j"),  # default username
+    password=os.getenv("NEO4J_PASSWORD", "12345678"),  # default password
+)               # one connection pool per process (thread–safe) :contentReference[oaicite:5]{index=5}
+# _llm    = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.0)
+
+# ----------------------------------------------------------------------
+# 2. Cache-key helper
+# ----------------------------------------------------------------------
+def _key(nodes: Sequence[str],
+         rels:  Sequence[str],
+         props: Sequence[str]) -> Tuple[Tuple[str, ...], ...]:
+    """Return a hashable, order-insensitive key for a schema triple."""
+    return tuple(map(tuple, (sorted(nodes), sorted(rels), sorted(props))))
+
+# ----------------------------------------------------------------------
+# 3. Cached builders
+# ----------------------------------------------------------------------
+@lru_cache(maxsize=32)              # threadsafe memoisation :contentReference[oaicite:6]{index=6}
+def build_transformer(key: Tuple[Tuple[str, ...], ...]) -> LLMGraphTransformer:
+    nodes, rels, props = key
+    return LLMGraphTransformer(
+        llm=MAIN_LLM,
+        allowed_nodes=list(nodes),
+        allowed_relationships=list(rels),
+        # node_properties=list(props),
+        ignore_tool_usage=True, 
+    )
+
+@lru_cache(maxsize=32)              # one QA chain per schema triple
+def build_rag_chain(key: Tuple[Tuple[str, ...], ...]) -> GraphCypherQAChain:
+    transformer = build_transformer(key)      # ensures same key
+
+    cypher_prompt = PromptTemplate(
+        template="""You are an expert at generating Cypher queries for Neo4j.
+        Use the following schema to generate a Cypher query that answers the given question.
+        Make the query flexible by using case-insensitive matching and partial string matching where appropriate.
+        Focus on searching paper titles as they contain the most relevant information.
+        
+        Schema:
+        {schema}
+        
+        Question: {question}
+        
+        Cypher Query:""",
+        input_variables=["schema", "question"],
+    )
+
+
+    qa_prompt = PromptTemplate(
+        template="""You are an assistant for question-answering tasks. 
+        Use the following Cypher query results to answer the question. If you don't know the answer, just say that you don't know. 
+        Use three sentences maximum and keep the answer concise. If topic information is not available, focus on the paper titles.
+        
+        Question: {question} 
+        Cypher Query: {query}
+        Query Results: {context} 
+        
+        Answer:""",
+        input_variables=["question", "query", "context"],
+    )
+    # prompts can be customised here; omitted for brevity
+    return GraphCypherQAChain.from_llm(
+        graph=_driver,
+        cypher_llm=MAIN_LLM,
+        qa_llm=MAIN_LLM,
+        validate_cypher=True,
+        allow_dangerous_requests=True,
+        verbose=True,
+        return_intermediate_steps=True,
+        return_direct=True,
+        cypher_prompt=cypher_prompt,
+        qa_prompt=qa_prompt,
+    )
+
+# 4. public facade
+_ingested_keys: set[Tuple[Tuple[str, ...], ...]] = set()  
+
+# ----------------------------------------------------------------------
+# 5. Public entry point
+# ----------------------------------------------------------------------
+def get_resources(nodes: Sequence[str],
+                  rels:  Sequence[str],
+                  props: Sequence[str], 
+                 doc_splits : Optional[Sequence[Document]] = None,  # optional document splits for RAG 
+                  ) -> tuple[LLMGraphTransformer, GraphCypherQAChain]:
+    
+    """Return a transformer and RAG chain for the given schema triple."""
+
+    k = _key(nodes, rels, props)
+
+    
+
+    if doc_splits and k not in _ingested_keys:
+        # If document splits are provided, use them for RAG
+        graph_transformer = build_transformer(k)
+
+        _driver.add_graph_documents(
+            graph_transformer.convert_to_graph_documents(doc_splits)  # transform splits to graph nodes
+        )
+        _ingested_keys.add(k)
+
+    
+    
+    
+    return build_transformer(k), build_rag_chain(k)
+
+
+
+================================================
+FILE: hallucination_grader.py
+================================================
+from langchain.prompts import PromptTemplate
+# from langchain_google_genai import ChatGoogleGenerativeAI
+from llm_config import MAIN_LLM
+
+from langchain_core.output_parsers import JsonOutputParser
+
+# llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.0)
+
+prompt = PromptTemplate(
+    template="""You are a grader assessing whether 
+    an answer is grounded in / supported by a set of facts. Give a binary score 'yes' or 'no' score to indicate 
+    whether the answer is grounded in / supported by a set of facts. Provide the binary score as a JSON with a 
+    single key 'score' and no preamble or explanation.
+    
+    Here are the facts:
+    {documents} 
+
+    Here is the answer: 
+    {generation}
+    """,
+    input_variables=["generation", "documents"],
+)
+
+hallucination_grader = prompt | MAIN_LLM | JsonOutputParser()
+
+
+================================================
+FILE: LICENSE
+================================================
+MIT License
+
+Copyright (c) 2025 mayankgarg2572
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+
+================================================
+FILE: llm_config.py
+================================================
+
+from dotenv import load_dotenv
+import os
+load_dotenv()  # Load environment variables from .env file
+
+from langchain_google_genai import ChatGoogleGenerativeAI
+MAIN_LLM = ChatGoogleGenerativeAI(
+    model="gemini-2.0-flash",
+    temperature=0.0,
+    api_key=os.getenv("GOOGLE_API_KEY"),  # Set to None to use the environment variable
+    )
+SCHEMA_LLM = ChatGoogleGenerativeAI(model="gemini-1.5-pro", temperature=0,
+    api_key=os.getenv("GOOGLE_API_KEY"),)
+
+
+
+# from groq import Groq
+# from langchain_groq import ChatGroq
+# MAIN_LLM = ChatGroq(temperature=0, model_name="Llama3-8b-8192",)
+# SCHEMA_LLM = ChatGroq(temperature=0, model_name="Llama3-8b-8192",)
+
+# from langchain_together import ChatTogether
+# MAIN_LLM = ChatTogether(model="meta-llama/Llama-3.3-70B-Instruct-Turbo",)
+# SCHEMA_LLM = ChatTogether(model="meta-llama/Llama-3.3-70B-Instruct-Turbo",)
+
+
+# from langchain_cohere import ChatCohere
+# MAIN_LLM = ChatCohere(model="command-r-03-2025", temperature=0.0)
+# SCHEMA_LLM = ChatCohere(model="command-r-03-2025", temperature=0.0)
+
+
+# from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
+
+# llm = HuggingFaceEndpoint(
+#     repo_id="neo4j/text2cypher-gemma-2-9b-it-finetuned-2024v1",
+#     task="text-generation",
+#     max_new_tokens=512,
+#     do_sample=False,
+#     repetition_penalty=1.03,
+# )
+
+# MAIN_LLM = ChatHuggingFace(llm=llm)
+# SCHEMA_LLM = ChatHuggingFace(llm=llm)
+
+
+
+================================================
+FILE: question_router.py
+================================================
+from langchain.prompts import PromptTemplate
+# from langchain_google_genai import ChatGoogleGenerativeAI
+
+from llm_config import MAIN_LLM
+
+from langchain_core.output_parsers import JsonOutputParser
+
+
+# llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash",  temperature=0.0)
+
+prompt = PromptTemplate(
+    template="""You are an expert at routing a user question to the most appropriate data source. 
+    You have three options:
+    1. 'vectorstore': Use for questions about LLM agents, prompt engineering, and adversarial attacks.
+    2. 'graphrag': Use for questions that involve relationships between entities, such as authors, papers, and topics, or when the question requires understanding connections between concepts.
+    3. 'web_search': Use for all other questions or when current information is needed.
+
+    You do not need to be stringent with the keywords in the question related to these topics. 
+    Choose the most appropriate option based on the nature of the question.
+
+    Return a JSON with a single key 'datasource' and no preamble or explanation. 
+    The value should be one of: 'vectorstore', 'graphrag', or 'web_search'.
+    
+    Question to route: 
+    {question}""",
+    input_variables=["question"],
+)
+
+question_router = prompt | MAIN_LLM | JsonOutputParser()
+
+
+================================================
+FILE: requirements.txt
+================================================
+langchain-groq
+groq
+langchain_community
+tiktoken
+langchainhub
+langchain
+langgraph
+tavily-python
+sentence-transformers
+langchain-huggingface
+beautifulsoup4
+langchain-experimental
+neo4j
+json-repair
+langchain-google-genai
+faiss-cpu
+streamlit
+langchain-neo4j
+langchain-together
+langchain-cohere
+
+
+================================================
+FILE: retrieval_grader.py
+================================================
+### Retrieval Grader
+from langchain.prompts import PromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
+# from langchain_google_genai import ChatGoogleGenerativeAI
+from llm_config import MAIN_LLM
+
+
+# llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.0)
+
+prompt = PromptTemplate(
+    template="""You are a grader assessing relevance 
+    of a retrieved document to a user question. If the document contains keywords related to the user question, 
+    grade it as relevant. It does not need to be a stringent test. The goal is to filter out erroneous retrievals. 
+    
+    Give a binary score 'yes' or 'no' score to indicate whether the document is relevant to the question.
+    Provide the binary score as a JSON with a single key 'score' and no premable or explaination.
+     
+    Here is the retrieved document: 
+    {document}
+    
+    Here is the user question: 
+    {question}
+    """,
+    input_variables=["question", "document"],
+)
+
+retrieval_grader = prompt | MAIN_LLM | JsonOutputParser()
+
+# # Example usage of the retrieval grader
+# question = "Do we have articles that talk about Prompt Engineering?"
+# docs = retriever.invoke(question)
+# doc_txt = docs[1].page_content
+# print(
+#     f'Is our answer relevant to the question asked: {retrieval_grader.invoke({"question": question, "document": doc_txt})}'
+# )
+
+
+================================================
+FILE: sample.txt
+================================================
+Doctor_1	treats	Patient_1
+Doctor_2	treats	Patient_2
+Doctor_1	treats	Patient_3
+Doctor_3	treats	Patient_4
+Doctor_2	prescribes	Medicine_A
+Doctor_3	prescribes	Medicine_B
+Doctor_1	prescribes	Medicine_C
+Patient_1	takes	Medicine_C
+Patient_2	takes	Medicine_A
+Patient_3	takes	Medicine_C
+Patient_4	takes	Medicine_B
+Patient_1	undergoes	Test_ECG
+Patient_2	undergoes	Test_Blood
+Patient_3	undergoes	Test_XRay
+Patient_4	undergoes	Test_ECG
+Medicine_A	treats_condition	Hypertension
+Medicine_B	treats_condition	Diabetes
+Medicine_C	treats_condition	Heart_Disease
+Test_ECG	diagnoses	Heart_Disease
+Test_Blood	diagnoses	Diabetes
+Test_XRay	diagnoses	Lung_Infection
+Doctor_1	specializes_in	Cardiology
+Doctor_2	specializes_in	Internal_Medicine
+Doctor_3	specializes_in	Endocrinology
+Patient_1	has_age	65
+Patient_2	has_age	54
+Patient_3	has_age	70
+Patient_4	has_age	58
+
+
+
+================================================
+FILE: .env.example
+================================================
+GOOGLE_API_KEY=AI..
+TAVILY_API_KEY=tvly-dev-..
+NEO4J_URI=bolt://localhost:7687/browser/
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=password
+

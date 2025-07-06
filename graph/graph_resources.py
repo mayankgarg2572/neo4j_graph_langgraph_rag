@@ -11,7 +11,7 @@ from langchain.prompts import PromptTemplate
 
 from langchain_core.documents import Document  # for RAG (retrieval-augmented generation)
 
-from llm_config import MAIN_LLM
+from config import MAIN_LLM
 
 # ----------------------------------------------------------------------
 # 1. Global, reusable driver and LLM (schema-independent)
@@ -44,6 +44,7 @@ def _key(nodes: Sequence[str],
 # ----------------------------------------------------------------------
 @lru_cache(maxsize=32)              # threadsafe memoisation :contentReference[oaicite:6]{index=6}
 def build_transformer(key: Tuple[Tuple[str, ...], ...]) -> LLMGraphTransformer:
+    print("In function: build_transformer with key:", key)
     nodes, rels, props = key
     return LLMGraphTransformer(
         llm=MAIN_LLM,
@@ -55,6 +56,7 @@ def build_transformer(key: Tuple[Tuple[str, ...], ...]) -> LLMGraphTransformer:
 
 @lru_cache(maxsize=32)              # one QA chain per schema triple
 def build_rag_chain(key: Tuple[Tuple[str, ...], ...]) -> GraphCypherQAChain:
+    print("In function: build_rag_chain with key:", key)
     transformer = build_transformer(key)      # ensures same key
 
     cypher_prompt = PromptTemplate(
@@ -115,7 +117,7 @@ def get_resources(nodes: Sequence[str],
 
     k = _key(nodes, rels, props)
 
-    
+    print("In function: get_resources with key:", k)
 
     if doc_splits and k not in _ingested_keys:
         # If document splits are provided, use them for RAG

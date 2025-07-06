@@ -26,13 +26,13 @@ After that go to the plugins tab as shown in the right hand side side bar along 
 
 Now install the plugin APOC.
 
-Set up your environment then, just create a `.env` file the paste the content from `.env.example` to this file. Provide the respective API keys like as mentioned:
+Set up your environment then, just create a `.env` file then paste the content from `.env.example` to this file. Provide the respective API keys like as mentioned:
 
 The Gemini API key
 
 The Tavily API key
 
-And the Neo4j setup. The default password here will be "password" and username will be "neo4j"(both are without quotes here are represented so everyone will have the clear vsion).
+And the Neo4j setup. The default password here will be "password" and username will be "neo4j"(both are without quotes here are represented so everyone will have the clear vision).
 
 Now, you are ready for python code installation setup.
 
